@@ -11,56 +11,66 @@ const client = redis.createClient();
 })();
 
 const rateLimiter = async (req, res, next) => {
-    const apiKey = req.headers["x-api-key"];
-    console.log("Detected API Key:", apiKey);
+    // 1. Check Global Kill Switch
+    const isKilled = await client.get("global_kill_switch");
+    if (isKilled === "true") {
+        return res.status(503).json({ 
+            message: "Service temporarily unavailable", 
+            reason: "Emergency Maintenance" 
+        });
+    }
 
-    if (!apiKey) return res.status(401).json({ message: "Api key missing" });
+    const apiKey = req.headers["x-api-key"]; //
+    if (!apiKey) return res.status(401).json({ message: "Api key missing" }); //
 
     const tier = {
-        'free': { limit: 5, windowMs: 60000 },
-        'pro': { limit: 100, windowMs: 60000 },
-        'enterprise': { limit: 1000, windowMs: 60000 }
+        'free': { limit: 5, windowMs: 60000 }, //
+        'pro': { limit: 100, windowMs: 60000 }, //
+        'enterprise': { limit: 1000, windowMs: 60000 } //
     };
 
-    let userTier = 'free';
-    if (apiKey.startsWith('pro_')) userTier = 'pro';
-    if (apiKey.startsWith('ent_')) userTier = 'enterprise';
+    let userTier = 'free'; //
+    if (apiKey.startsWith('pro_')) userTier = 'pro'; //
+    if (apiKey.startsWith('ent_')) userTier = 'enterprise'; //
 
-    const limit = tier[userTier].limit;
-    const windowMs = tier[userTier].windowMs || 60000;
-
-    const now = Date.now();
-    const key = `rate_limit:${apiKey}`;
+    const { limit, windowMs } = tier[userTier]; //
+    const key = `rate_limit:${apiKey}`; //
+    const now = Date.now(); //
 
     try {
-        await client.zRemRangeByScore(key, 0, now - windowMs);
-        const requestCount = await client.zCard(key);
+        await client.zRemRangeByScore(key, 0, now - windowMs); //
+        const requestCount = await client.zCard(key); //
 
-        const cost = req.path === '/heavy-data' ? 2 : 1;
+        const cost = req.path === '/heavy-data' ? 2 : 1; //
 
-        if (requestCount + cost > limit) {
-            const blockKey = `blocked_logs:${apiKey}`;
-            await client.incr(blockKey);
-            await client.expire(blockKey, 3600);
+        // 2. SOFT LIMITING: Introduce a 2-second delay at 80% usage
+        if (requestCount + cost > limit * 0.8 && requestCount + cost <= limit) {
+            console.log(`⚠️ Throttling user ${apiKey} (80% usage reached)`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
 
+        // 3. HARD LIMITING
+        if (requestCount + cost > limit) { //
+            await client.incr(`blocked_logs:${apiKey}`);
+            await client.expire(`blocked_logs:${apiKey}`, 3600); 
             return res.status(429).json({
-                message: "Rate limit exceeded",
+                message: "Rate limit exceeded", //
                 tier: userTier,
                 currentUsage: requestCount,
                 limit: limit
             });
         }
 
-        await client.zAdd(key, { score: now, value: `${now}-${Math.random()}` });
-        await client.expire(key, Math.floor(windowMs / 1000));
+        await client.zAdd(key, { score: now, value: `${now}-${Math.random()}` }); //
+        await client.expire(key, Math.floor(windowMs / 1000)); //
 
         res.set('X-RateLimit-Limit', limit);
         res.set('X-RateLimit-Remaining', limit - (requestCount + cost));
 
-        next();
+        next(); //
     } catch (err) {
-        console.error("Redis error : ", err);
-        next(); // Fail-open: don't block users if Redis has issues
+        console.error("Redis error : ", err); //
+        next(); 
     }
 };
 

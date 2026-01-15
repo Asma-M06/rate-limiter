@@ -3,7 +3,7 @@ const path = require("path");
 const { rateLimiter, client } = require("./middleware/rateLimiter");
 
 const app = express();
-
+app.use(express.json());
 // Serve the UI files from a 'public' folder
 app.use(express.static('public'));
 
@@ -41,6 +41,13 @@ app.get("/admin/usage", async (req, res) => {
 // --- UI DASHBOARD ROUTE ---
 app.get("/dashboard", (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Admin Panic Button
+app.post("/admin/killswitch", async (req, res) => {
+    const { status } = req.body; // true or false
+    await client.set("global_kill_switch", String(status));
+    res.json({ message: `Global Kill Switch set to ${status}` });
 });
 
 app.listen(3000, () => {
