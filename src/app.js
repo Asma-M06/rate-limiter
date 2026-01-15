@@ -1,36 +1,49 @@
 const express = require("express");
-const rateLimiter = require("./middleware/rateLimiter");
+const path = require("path");
+const { rateLimiter, client } = require("./middleware/rateLimiter");
 
 const app = express();
-app.use(express.json()); // Essential for modern APIs
 
-// --- API ROUTES ---
+// Serve the UI files from a 'public' folder
+app.use(express.static('public'));
 
-// 1. Standard Route (Cost = 1)
+// --- EXISTING DATA ROUTE ---
 app.get("/api/data", rateLimiter, (req, res) => {
-    res.json({ 
-        message: "You accessed standard data.",
-        usage_info: "This call cost 1 credit."
-    });
+    res.json({ message: "you accessed the protected data" });
 });
 
-// 2. Heavy Resource Route (Cost = 2 for Enterprise)
-app.get("/api/heavy-data", rateLimiter, (req, res) => {
-    res.json({ 
-        message: "You accessed heavy resources.",
-        usage_info: "This call cost 2 credits for Enterprise users."
-    });
+// --- NEW ADMIN API ROUTE ---
+app.get("/admin/usage", async (req, res) => {
+    try {
+        const usageKeys = await client.keys("rate_limit:*");
+        const blockedKeys = await client.keys("blocked_logs:*");
+
+        const usageDetails = await Promise.all(usageKeys.map(async (key) => {
+            const apiKey = key.replace("rate_limit:", "");
+            const count = await client.zCard(key);
+
+            // Get blocked count for this specific key
+            const blockedCount = await client.get(`blocked_logs:${apiKey}`) || 0;
+
+            return {
+                apiKey: apiKey.trim(),
+                currentRequests: count,
+                blockedRequests: parseInt(blockedCount)
+            };
+        }));
+
+        res.json({ usageDetails });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch stats" });
+    }
 });
 
-// 3. Admin Health Check
-app.get("/health", (req, res) => {
-    res.status(200).json({ status: "UP", database: "Redis" });
+// --- UI DASHBOARD ROUTE ---
+app.get("/dashboard", (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`-> Tiered API System running on port ${PORT}`);
-    console.log(`-> Test FREE: No key or random key`);
-    console.log(`-> Test PRO: Header x-api-key: pro_123`);
-    console.log(`-> Test ENTERPRISE: Header x-api-key: ent_999`);
+app.listen(3000, () => {
+    console.log(" Server running on port 3000");
+    console.log(" Dashboard available at http://localhost:3000/dashboard");
 });

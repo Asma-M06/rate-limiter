@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Sentinel | Enterprise Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-[#0f172a] text-slate-200 font-sans antialiased">
+    <div class="max-w-7xl mx-auto p-8">
+        
+        <div class="flex justify-between items-center mb-10">
+            <div>
+                <h1 class="text-4xl font-extrabold text-white tracking-tight italic">
+                    API <span class="text-blue-500">SENTINEL</span>
+                </h1>
+                <p class="text-slate-400 mt-1 uppercase text-xs tracking-widest font-semibold">
+                    Real-Time Redis Rate-Limit Analytics
+                </p>
+            </div>
+            <div class="flex items-center space-x-4 bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700">
+                <span class="flex h-3 w-3 rounded-full bg-green-500 animate-pulse"></span>
+                <span class="text-sm font-bold text-slate-300">SYSTEM OPERATIONAL</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <div class="lg:col-span-1 space-y-6">
+                <div class="bg-[#1e293b] rounded-2xl p-6 border border-slate-700 shadow-2xl">
+                    <h2 class="text-xl font-bold mb-6 flex items-center text-white">
+                        <i class="fas fa-shield-halved mr-3 text-blue-400"></i> Active Consumers
+                    </h2>
+                    <div id="usage-list" class="space-y-4">
+                        <div class="animate-pulse text-slate-500 text-sm">Waiting for Redis data...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 space-y-8">
+                <div class="bg-[#1e293b] rounded-2xl p-6 border border-slate-700 shadow-2xl">
+                    <h2 class="text-xl font-bold mb-6 flex items-center text-white">
+                        <i class="fas fa-chart-bar mr-3 text-purple-400"></i> Traffic Distribution
+                    </h2>
+                    <div class="h-[300px]">
+                        <canvas id="usageChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-blue-500/10 border border-blue-500/20 p-4 rounded-xl">
+                        <p class="text-blue-400 text-xs uppercase font-bold">Standard Window</p>
+                        <p class="text-2xl font-bold text-white">60 Seconds</p>
+                    </div>
+                    <div class="bg-purple-500/10 border border-purple-500/20 p-4 rounded-xl">
+                        <p class="text-purple-400 text-xs uppercase font-bold">Storage Provider</p>
+                        <p class="text-2xl font-bold text-white">Redis Cache</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Chart
+        const ctx = document.getElementById('usageChart').getContext('2d');
+        const myChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Successful Requests',
+                    data: [],
+                    backgroundColor: 'rgba(59, 130, 246, 0.6)',
+                    borderColor: '#3b82f6',
+                    borderWidth: 2,
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                    x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+
+        // Update Stats Function
+        async function updateStats() {
+            try {
+                const res = await fetch('/admin/usage');
+                const data = await res.json();
+                
+                const list = document.getElementById('usage-list');
+                
+                if (data.usageDetails.length === 0) {
+                    list.innerHTML = '<p class="text-slate-500 text-center text-sm italic">No active traffic detected</p>';
+                    return;
+                }
+
+                list.innerHTML = data.usageDetails.map(u => {
+                    const isEnterprise = u.apiKey.startsWith('ent_');
+                    const isHighRisk = u.blockedRequests > 0;
+                    
+                    return `
+                        <div class="p-4 rounded-xl bg-[#0f172a] border ${isHighRisk ? 'border-red-500/50' : 'border-slate-800'} hover:border-blue-500/50 transition-all">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="font-mono text-[11px] text-slate-400 tracking-tighter">${u.apiKey}</span>
+                                <span class="px-2 py-0.5 rounded text-[9px] font-bold uppercase ${isHighRisk ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-500/20 text-blue-400'}">
+                                    ${isHighRisk ? 'Blocked' : (isEnterprise ? 'Enterprise' : 'Free')}
+                                </span>
+                            </div>
+                            <div class="flex justify-between items-end">
+                                <div>
+                                    <div class="text-2xl font-bold text-white">${u.currentRequests}</div>
+                                    <div class="text-[9px] text-slate-500 uppercase font-bold">Active Window</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-xl font-bold ${u.blockedRequests > 0 ? 'text-red-400' : 'text-slate-700'}">${u.blockedRequests}</div>
+                                    <div class="text-[9px] text-slate-500 uppercase font-bold">Violations</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                // Update Chart Data
+                myChart.data.labels = data.usageDetails.map(u => u.apiKey);
+                myChart.data.datasets[0].data = data.usageDetails.map(u => u.currentRequests);
+                myChart.update();
+
+            } catch (err) {
+                console.error("Dashboard Fetch Error:", err);
+            }
+        }
+
+        // Poll every 1 second for "live" feel
+        setInterval(updateStats, 1000);
+        updateStats(); // Initial call
+    </script>
+</body>
+</html>
