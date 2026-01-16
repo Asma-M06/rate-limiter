@@ -18,3 +18,6 @@ A production-grade API rate limiting service built with **Node.js** and **Redis*
 1. **Free Tier:** Send 5 requests with `x-api-key: user_123`. The 6th request will return a `429` error.
 2. **Throttling:** Reach 4 requests (80% of 5). Notice the 2-second delay on the 4th request.
 3. **Emergency Kill:** Click "Emergency Kill" on the dashboard. All subsequent API calls will return a `503`.
+
+## Architectures and Algorithms
+[View the Diagram here](https://app.eraser.io/workspace/wQ3ItvN89X2cIzIyQpZc?origin=share)
